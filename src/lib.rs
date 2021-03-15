@@ -534,10 +534,12 @@ impl Renderer {
         clip_scale: [f32; 2],
         draw_list_buffers_index: usize,
     ) -> RendererResult<()> {
-        let mut start = 0;
-
         let index_buffer = &self.index_buffers[draw_list_buffers_index];
         let vertex_buffer = &self.vertex_buffers[draw_list_buffers_index];
+
+        // Make sure the current buffers are attached to the render pass.
+        rpass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
+        rpass.set_vertex_buffer(0, vertex_buffer.slice(..));
 
         for cmd in draw_list.commands() {
             if let Elements {
@@ -552,13 +554,6 @@ impl Renderer {
                     },
             } = cmd
             {
-                // Make sure the current buffers are attached to the render pass.
-                rpass.set_index_buffer(
-                    index_buffer.slice((idx_offset as u64)..),
-                    IndexFormat::Uint16,
-                );
-                rpass.set_vertex_buffer(0, vertex_buffer.slice((vtx_offset as u64)..));
-
                 let clip_rect = [
                     (clip_rect[0] - clip_off[0]) * clip_scale[0],
                     (clip_rect[1] - clip_off[1]) * clip_scale[1],
@@ -583,10 +578,11 @@ impl Renderer {
                 rpass.set_scissor_rect(scissors.0, scissors.1, scissors.2, scissors.3);
 
                 // Draw the current batch of vertices with the renderpass.
-                let end = start + count as u32;
-                //rpass.draw_indexed(start..end, 0, 0..1);
-                rpass.draw_indexed(0..count as u32, 0, 0..1);
-                start = end;
+                rpass.draw_indexed(
+                    idx_offset as u32..(idx_offset + count) as u32,
+                    vtx_offset as i32,
+                    0..1,
+                );
             }
         }
         Ok(())
