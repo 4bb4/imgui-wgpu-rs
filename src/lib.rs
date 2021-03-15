@@ -1,5 +1,6 @@
 use imgui::{
-    Context, DrawCmd::Elements, DrawData, DrawIdx, DrawList, DrawVert, TextureId, Textures,
+    BackendFlags, Context, DrawCmd::Elements, DrawCmdParams, DrawData, DrawIdx, DrawList, DrawVert,
+    TextureId, Textures,
 };
 use smallvec::SmallVec;
 use std::mem::size_of;
@@ -412,6 +413,12 @@ impl Renderer {
             alpha_to_coverage_enabled: false,
         });
 
+        // Let imgui know that we support VtxOffset.
+        imgui
+            .io_mut()
+            .backend_flags
+            .insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
+
         let mut renderer = Self {
             pipeline,
             uniform_buffer,
@@ -509,8 +516,6 @@ impl Renderer {
         clip_scale: [f32; 2],
         draw_list_buffers_index: usize,
     ) -> RendererResult<()> {
-        let mut start = 0;
-
         let index_buffer = &self.index_buffers[draw_list_buffers_index];
         let vertex_buffer = &self.vertex_buffers[draw_list_buffers_index];
 
@@ -519,16 +524,26 @@ impl Renderer {
         rpass.set_vertex_buffer(0, vertex_buffer.slice(..));
 
         for cmd in draw_list.commands() {
-            if let Elements { count, cmd_params } = cmd {
+            if let Elements {
+                count,
+                cmd_params:
+                    DrawCmdParams {
+                        clip_rect,
+                        texture_id,
+                        vtx_offset,
+                        idx_offset,
+                        ..
+                    },
+            } = cmd
+            {
                 let clip_rect = [
-                    (cmd_params.clip_rect[0] - clip_off[0]) * clip_scale[0],
-                    (cmd_params.clip_rect[1] - clip_off[1]) * clip_scale[1],
-                    (cmd_params.clip_rect[2] - clip_off[0]) * clip_scale[0],
-                    (cmd_params.clip_rect[3] - clip_off[1]) * clip_scale[1],
+                    (clip_rect[0] - clip_off[0]) * clip_scale[0],
+                    (clip_rect[1] - clip_off[1]) * clip_scale[1],
+                    (clip_rect[2] - clip_off[0]) * clip_scale[0],
+                    (clip_rect[3] - clip_off[1]) * clip_scale[1],
                 ];
 
                 // Set the current texture bind group on the renderpass.
-                let texture_id = cmd_params.texture_id;
                 let tex = self
                     .textures
                     .get(texture_id)
@@ -545,9 +560,11 @@ impl Renderer {
                 rpass.set_scissor_rect(scissors.0, scissors.1, scissors.2, scissors.3);
 
                 // Draw the current batch of vertices with the renderpass.
-                let end = start + count as u32;
-                rpass.draw_indexed(start..end, 0, 0..1);
-                start = end;
+                rpass.draw_indexed(
+                    idx_offset as u32..(idx_offset + count) as u32,
+                    vtx_offset as i32,
+                    0..1,
+                );
             }
         }
         Ok(())
